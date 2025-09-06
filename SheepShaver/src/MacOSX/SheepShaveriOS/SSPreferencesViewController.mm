@@ -296,6 +296,13 @@ int SS_ChooseiOSBootRom(const char* inFileName)
 	self.avPaneViewController = [[SSPreferencesAVViewController alloc] initWithNibName:@"SSPreferencesAVViewController" bundle:[NSBundle mainBundle]];
 	self.ioPaneViewController = [[SSPreferencesIOViewController alloc] initWithNibName:@"SSPreferencesIOViewController" bundle:[NSBundle mainBundle]];
 	self.bootROMPaneViewController = [[SSPreferencesBootROMViewController alloc] initWithNibName:@"SSPreferencesBootROMViewController" bundle:[NSBundle mainBundle]];
+	
+	// Force all view controllers to load their views immediately to ensure all preferences are loaded upfront
+	[self.hardwarePaneViewController view];
+	[self.disksPaneViewController view];
+	[self.avPaneViewController view];
+	[self.ioPaneViewController view];
+	[self.bootROMPaneViewController view];
 
 	self.paneScroller.layer.borderWidth = 1;
 	self.paneScroller.layer.borderColor = [UIColor lightGrayColor].CGColor;
