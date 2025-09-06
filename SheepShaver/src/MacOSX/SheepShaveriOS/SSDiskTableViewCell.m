@@ -38,13 +38,20 @@
 		self.diskMountEnableSwitch = [UISwitch new];
 		self.isCDROMSwitch = [UISwitch new];
 		self.diskNameLabel = [UILabel new];
+		self.deleteButton = [UIButton buttonWithType:UIButtonTypeSystem];
 		
 		[self.contentView addSubview:self.diskMountEnableSwitch];
 		[self.contentView addSubview:self.isCDROMSwitch];
 		[self.contentView addSubview:self.diskNameLabel];
+		[self.contentView addSubview:self.deleteButton];
+		
+		// Configure delete button
+		[self.deleteButton setTitle:@"Delete" forState:UIControlStateNormal];
+		[self.deleteButton setTitleColor:[UIColor systemRedColor] forState:UIControlStateNormal];
 		
 		[self.diskMountEnableSwitch addTarget:self action:@selector(diskMountEnableSwitchHit:) forControlEvents:UIControlEventValueChanged];
 		[self.isCDROMSwitch addTarget:self action:@selector(isCDROMSwitchHit:) forControlEvents:UIControlEventValueChanged];
+		[self.deleteButton addTarget:self action:@selector(deleteButtonHit:) forControlEvents:UIControlEventTouchUpInside];
 
 		CGRect aContentFrame = self.contentView.frame;
 		[self _resizeToNewSize:aContentFrame.size];
@@ -67,12 +74,18 @@
 	[self.disksViewController _writePrefs];
 }
 
+- (IBAction)deleteButtonHit:(id)sender
+{
+	[self.disksViewController deleteDisk:self.disk];
+}
+
 // This will probably never be called, but just for completeness:
 - (void) prepareForReuse
 {
 	self.diskMountEnableSwitch = nil;
 	self.diskNameLabel = nil;
 	self.isCDROMSwitch = nil;
+	self.deleteButton = nil;
 	
 	self.disksViewController = nil;
 	self.disk = nil;
@@ -102,9 +115,16 @@
 	aMountFrame.origin.y = (inSize.height / 2) - (aMountFrame.size.height / 2);
 	[self.diskMountEnableSwitch setFrame:aMountFrame];
 	
-	// Label gets the rest of the space from the left edge to the mount enable switch.
+	// Delete button to the left of mount enable switch.
+	[self.deleteButton sizeToFit];
+	CGRect deleteFrame = self.deleteButton.frame;
+	deleteFrame.origin.x = aMountFrame.origin.x - deleteFrame.size.width - 12;
+	deleteFrame.origin.y = (inSize.height / 2) - (deleteFrame.size.height / 2);
+	[self.deleteButton setFrame:deleteFrame];
+	
+	// Label gets the rest of the space from the left edge to the delete button.
 	CGRect aFileNameFrame = self.diskNameLabel.frame;
-	aFileNameFrame.size.width = aMountFrame.origin.x - 12;
+	aFileNameFrame.size.width = deleteFrame.origin.x - 12;
 	aFileNameFrame.size.height = 21;
 	aFileNameFrame.origin.x = 8;
 	aFileNameFrame.origin.y = (inSize.height / 2) - (aFileNameFrame.size.height / 2);

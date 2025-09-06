@@ -56,6 +56,7 @@
 {
 	PrefsReplaceBool("ipadmousepassthrough", self.useiPadMousePassthroughSwitch.isOn);
 	SDL_SetHint(SDL_HINT_IOS_IPAD_MOUSE_PASSTHROUGH, (self.useiPadMousePassthroughSwitch.isOn ? "1" : "0"));
+	SavePrefs();
 	
 	NSLog (@"%s Passthrough on: %@", __PRETTY_FUNCTION__, (self.useiPadMousePassthroughSwitch.isOn ? @"YES" : @"NO"));
 }

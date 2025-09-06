@@ -20,12 +20,14 @@ NS_ASSUME_NONNULL_BEGIN
 @property (readwrite, nonatomic)  IBOutlet UILabel* _Nullable diskNameLabel;
 @property (readwrite, nonatomic)  IBOutlet UISwitch* _Nullable isCDROMSwitch;
 @property (readwrite, nonatomic)  IBOutlet UISwitch* _Nullable diskMountEnableSwitch;
+@property (readwrite, nonatomic)  IBOutlet UIButton* _Nullable deleteButton;
 
 @property (readwrite, nonatomic) SSPreferencesDisksViewController* _Nullable disksViewController;
 @property (readwrite, nonatomic) DiskTypeiOS* _Nullable disk;
 
 - (IBAction)diskMountEnableSwitchHit:(UISwitch*)sender;
 - (IBAction)isCDROMSwitchHit:(UISwitch*)sender;
+- (IBAction)deleteButtonHit:(UIButton*)sender;
 
 @end
 

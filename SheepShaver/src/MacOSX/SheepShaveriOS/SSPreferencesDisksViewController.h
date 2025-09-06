@@ -11,16 +11,20 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface SSPreferencesDisksViewController : UIViewController <UITableViewDelegate, UITableViewDataSource>
+@interface SSPreferencesDisksViewController : UIViewController <UITableViewDelegate, UITableViewDataSource, UIDocumentPickerDelegate>
 
 @property (readwrite, nonatomic) IBOutlet UIButton* createNewDiskButton;
+@property (readwrite, nonatomic) IBOutlet UIButton* addExistingDiskButton;
 @property (readwrite, nonatomic) IBOutlet UISwitch* bootFromCDROMFirstSwitch;
 @property (readwrite, nonatomic) IBOutlet UITableView* diskTable;
 
 @property (readonly, nonatomic) NSMutableArray<DiskTypeiOS*>* diskArray;
 
 - (IBAction)createNewDiskButtonHit:(id)sender;
+- (IBAction)addExistingDiskButtonHit:(id)sender;
 - (IBAction)bootFromCDROMFirstSwitchHit:(id)sender;
+
+- (void)deleteDisk:(DiskTypeiOS*)disk;
 
 @end
 

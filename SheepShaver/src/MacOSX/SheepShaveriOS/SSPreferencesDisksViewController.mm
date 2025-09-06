@@ -15,6 +15,10 @@
 #import <stdio.h>
 #import <unistd.h>
 
+#if __has_include(<UniformTypeIdentifiers/UniformTypeIdentifiers.h>)
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#endif
+
 #define int32 int32_t
 #import "prefs.h"
 
@@ -73,9 +77,26 @@ const int kCDROMRefNum = -62;			// RefNum of driver
 //	self.createNewDiskButton.contentEdgeInsets = UIEdgeInsetsMake(4, 4, 4, 4);
 }
 
+- (void) _resolveBookmarkedURLs
+{
+	// Bookmark resolution for external files doesn't work on iOS due to sandbox restrictions
+	// The security-scoped resource access cannot persist to the Unix-level file operations
+	// Users must copy external disk images into the app's Documents directory
+	
+	// Clean up any old bookmarks that might exist
+	NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+	if ([defaults objectForKey:@"DiskImageBookmarks"]) {
+		[defaults removeObjectForKey:@"DiskImageBookmarks"];
+		[defaults synchronize];
+	}
+}
+
 - (void) _loadDiskData
 {
 	self.diskArray = [NSMutableArray new];
+	
+	// First, resolve any bookmarked URLs for external disk images
+	[self _resolveBookmarkedURLs];
 
 	// First we scan for all available disks in the Documents directory. Then we reconcile that
 	// with the "disk" prefs, eliminating any existing prefs that we can't find in the Documents
@@ -84,9 +105,11 @@ const int kCDROMRefNum = -62;			// RefNum of driver
 	int index = 0;
 	while ((dsk = PrefsFindString("disk", index++)) != NULL) {
 		DiskTypeiOS *disk = [DiskTypeiOS new];
-		[disk setPath:[NSString stringWithUTF8String: dsk ]];
+		NSString *diskPath = [NSString stringWithUTF8String: dsk];
+		[disk setPath:diskPath];
 		[disk setIsCDROM:NO];
 		
+		NSLOG(@"%s Found disk in prefs: %@", __PRETTY_FUNCTION__, diskPath);
 		[self.diskArray addObject:disk];
 	}
 	
@@ -130,12 +153,12 @@ const int kCDROMRefNum = -62;			// RefNum of driver
 
 		// Ok, we have a file (as opposed to a directory) and it exists. See if it has an extension that's not a disk file.
 		if (anElementPath.pathExtension.length > 0) {
-			if ([anElementPath.pathExtension compare:@"dsk" options:NSCaseInsensitiveSearch] == NSOrderedSame) {
-				// Extension exists and is "dsk".
-				[aDiskCandidateFiles addObject:anElementPath];
-			} else if ([anElementPath.pathExtension compare:@"dmg" options:NSCaseInsensitiveSearch] == NSOrderedSame) {
-				[aDiskCandidateFiles addObject:anElementPath];
-			} else if ([anElementPath.pathExtension compare:@"cdr" options:NSCaseInsensitiveSearch] == NSOrderedSame) {
+			NSString* extension = [anElementPath.pathExtension lowercaseString];
+			if ([extension isEqualToString:@"dsk"] ||
+			    [extension isEqualToString:@"dmg"] ||
+			    [extension isEqualToString:@"cdr"] ||
+			    [extension isEqualToString:@"iso"] ||
+			    [extension isEqualToString:@"img"]) {
 				[aDiskCandidateFiles addObject:anElementPath];
 			} else {
 				NSLOG (@"%s Extension %@ is unknown: %@", __PRETTY_FUNCTION__, anElementPath.pathExtension, anElementName);
@@ -160,12 +183,21 @@ const int kCDROMRefNum = -62;			// RefNum of driver
 		NSString* aSearchPath = [aSearchDisk path];
 		
 		BOOL aFoundIt = NO;
-		for (int aDiskCandidateIndex = 0; aDiskCandidateIndex < aDiskCandidateFiles.count; aDiskCandidateIndex++) {
-			if ([aSearchPath.lastPathComponent compare:[aDiskCandidateFiles objectAtIndex:aDiskCandidateIndex].lastPathComponent options:NSCaseInsensitiveSearch] == NSOrderedSame) {
-				aFoundIt = YES;
-				break;
+		
+		// Check if it's an absolute path (external disk)
+		if ([aSearchPath hasPrefix:@"/"]) {
+			// For absolute paths, check if the file exists
+			aFoundIt = [[NSFileManager defaultManager] fileExistsAtPath:aSearchPath];
+		} else {
+			// For relative paths, look in the Documents directory
+			for (int aDiskCandidateIndex = 0; aDiskCandidateIndex < aDiskCandidateFiles.count; aDiskCandidateIndex++) {
+				if ([aSearchPath.lastPathComponent compare:[aDiskCandidateFiles objectAtIndex:aDiskCandidateIndex].lastPathComponent options:NSCaseInsensitiveSearch] == NSOrderedSame) {
+					aFoundIt = YES;
+					break;
+				}
 			}
 		}
+		
 		if (aFoundIt) {
 			aDiskArrayIndex++;
 		} else {
@@ -184,7 +216,9 @@ const int kCDROMRefNum = -62;			// RefNum of driver
 		for (aDiskArrayIndex = 0; aDiskArrayIndex < self.diskArray.count; aDiskArrayIndex++) {
 			DiskTypeiOS* aSearchDisk = [self.diskArray objectAtIndex:aDiskArrayIndex];
 			NSString* aSearchPath = [aSearchDisk path];
-			if ([aSearchPath.lastPathComponent compare:anExistingDiskPath.lastPathComponent options:NSCaseInsensitiveSearch] == NSOrderedSame) {
+			// For files in Documents directory, we need to handle both absolute and relative paths
+			if ([aSearchPath isEqualToString:anExistingDiskPath] ||
+			    [aSearchPath.lastPathComponent compare:anExistingDiskPath.lastPathComponent options:NSCaseInsensitiveSearch] == NSOrderedSame) {
 				aFoundIt = YES;
 				break;
 			}
@@ -192,7 +226,8 @@ const int kCDROMRefNum = -62;			// RefNum of driver
 		if (!aFoundIt) {
 			DiskTypeiOS *disk = [DiskTypeiOS new];
 			[disk setPath:anExistingDiskPath];
-			if ([anExistingDiskPath.pathExtension compare:@"cdr" options:NSCaseInsensitiveSearch] == NSOrderedSame) {
+			NSString* extension = [anExistingDiskPath.pathExtension lowercaseString];
+			if ([extension isEqualToString:@"cdr"] || [extension isEqualToString:@"iso"]) {
 				[disk setIsCDROM:YES];
 			} else {
 				[disk setIsCDROM:NO];
@@ -210,8 +245,6 @@ const int kCDROMRefNum = -62;			// RefNum of driver
 	}
 		
 	NSLOG (@"%s Disk array after adding disabled real disks: %@", __PRETTY_FUNCTION__, self.diskArray);
-	
-	[self _writePrefs];
 }
 
 - (void) _writePrefs
@@ -229,13 +262,23 @@ const int kCDROMRefNum = -62;			// RefNum of driver
 	// the document directory can change.
 	NSString* aDocsDirectory = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
 	if (self.diskArray.count == 1) {
-		PrefsAddString(self.diskArray.firstObject.isCDROM ? "cdrom" : "disk", [self.diskArray.firstObject.path UTF8String]);		// even if it is disabled, since it's the only one
+		// Check if the path is already absolute (for external disks)
+		NSString* diskPath = self.diskArray.firstObject.path;
+		if (![diskPath hasPrefix:@"/"]) {
+			// Relative path - prepend documents directory
+			diskPath = [aDocsDirectory stringByAppendingPathComponent:diskPath];
+		}
+		PrefsAddString(self.diskArray.firstObject.isCDROM ? "cdrom" : "disk", [diskPath UTF8String]);		// even if it is disabled, since it's the only one
 	} else {
 		for (DiskTypeiOS* aDiskType in self.diskArray) {
 			if (aDiskType.disable == NO) {
-				NSString* aFileName = aDiskType.path.lastPathComponent;
-				NSString* aFilePath = [aDocsDirectory stringByAppendingPathComponent:aFileName];
-				PrefsAddString(aDiskType.isCDROM ? "cdrom" : "disk", [aFilePath UTF8String]);
+				// Check if the path is already absolute (for external disks)
+				NSString* diskPath = aDiskType.path;
+				if (![diskPath hasPrefix:@"/"]) {
+					// Relative path - prepend documents directory
+					diskPath = [aDocsDirectory stringByAppendingPathComponent:diskPath];
+				}
+				PrefsAddString(aDiskType.isCDROM ? "cdrom" : "disk", [diskPath UTF8String]);
 			}
 		}
 	}
@@ -373,6 +416,180 @@ const int kCDROMRefNum = -62;			// RefNum of driver
 	}
 }
 
+- (IBAction)addExistingDiskButtonHit:(id)sender
+{
+	if (@available(iOS 14.0, *)) {
+		// Create an array of UTTypes for disk images
+		NSMutableArray<UTType*>* diskTypes = [NSMutableArray array];
+		
+		// Add disk image type using identifier instead of constant
+		UTType* diskImageType = [UTType typeWithIdentifier:@"public.disk-image"];
+		if (diskImageType) [diskTypes addObject:diskImageType];
+		
+		// Add specific disk image formats
+		UTType* dskType = [UTType typeWithFilenameExtension:@"dsk"];
+		UTType* dmgType = [UTType typeWithFilenameExtension:@"dmg"];
+		UTType* cdrType = [UTType typeWithFilenameExtension:@"cdr"];
+		UTType* imgType = [UTType typeWithFilenameExtension:@"img"];
+		UTType* isoType = [UTType typeWithFilenameExtension:@"iso"];
+		
+		if (dskType) [diskTypes addObject:dskType];
+		if (dmgType) [diskTypes addObject:dmgType];
+		if (cdrType) [diskTypes addObject:cdrType];
+		if (imgType) [diskTypes addObject:imgType];
+		if (isoType) [diskTypes addObject:isoType];
+		
+		UIDocumentPickerViewController* picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:diskTypes];
+		picker.delegate = self;
+		picker.allowsMultipleSelection = YES;
+		[self presentViewController:picker animated:YES completion:nil];
+	} else {
+		// Fallback for older iOS versions
+		NSArray<NSString*>* documentTypes = @[@"public.disk-image", @"com.apple.disk-image-dmg", 
+											   @"public.iso-image", @"public.data"];
+		UIDocumentPickerViewController* picker = [[UIDocumentPickerViewController alloc] 
+												  initWithDocumentTypes:documentTypes 
+												  inMode:UIDocumentPickerModeOpen];
+		picker.delegate = self;
+		picker.allowsMultipleSelection = YES;
+		[self presentViewController:picker animated:YES completion:nil];
+	}
+}
+
+#pragma mark - UIDocumentPickerDelegate
+
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
+{
+	NSLOG(@"%s Picked documents: %@", __PRETTY_FUNCTION__, urls);
+	
+	NSString* aDocsDirectory = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+	
+	// Ask user if they want to copy or reference the files
+	if (urls.count > 0) {
+		// Check if any files are from external locations (iCloud, etc)
+		BOOL hasExternalFiles = NO;
+		for (NSURL* url in urls) {
+			if (![[url path] hasPrefix:aDocsDirectory]) {
+				hasExternalFiles = YES;
+				break;
+			}
+		}
+		
+		if (hasExternalFiles) {
+			// For external files, we must copy them due to iOS sandbox restrictions
+			UIAlertController* importAlert = [UIAlertController alertControllerWithTitle:@"Import Disk Images" 
+																				message:@"External disk images (from iCloud Drive, etc.) must be copied to SheepShaver's storage due to iOS security restrictions. The app cannot access external files during emulation."
+																		 preferredStyle:UIAlertControllerStyleAlert];
+			
+			[importAlert addAction:[UIAlertAction actionWithTitle:@"Copy to SheepShaver" 
+															style:UIAlertActionStyleDefault 
+														  handler:^(UIAlertAction * _Nonnull action) {
+				[self _copyDiskImages:urls toDirectory:aDocsDirectory];
+			}]];
+			
+			[importAlert addAction:[UIAlertAction actionWithTitle:@"Cancel" 
+															style:UIAlertActionStyleCancel 
+														  handler:nil]];
+			
+			[self presentViewController:importAlert animated:YES completion:nil];
+		} else {
+			// Files are already in our Documents directory, just add them
+			[self _copyDiskImages:urls toDirectory:aDocsDirectory];
+		}
+	}
+}
+
+- (void)_copyDiskImages:(NSArray<NSURL*>*)urls toDirectory:(NSString*)aDocsDirectory
+{
+	for (NSURL* url in urls) {
+		// Start accessing security-scoped resource
+		BOOL startAccessing = [url startAccessingSecurityScopedResource];
+		if (!startAccessing) {
+			NSLOG(@"%s Failed to start accessing security scoped resource: %@", __PRETTY_FUNCTION__, url);
+			continue;
+		}
+		
+		NSError* error = nil;
+		NSString* fileName = [url lastPathComponent];
+		NSString* destinationPath = [aDocsDirectory stringByAppendingPathComponent:fileName];
+		
+		// Check if file already exists
+		if ([[NSFileManager defaultManager] fileExistsAtPath:destinationPath]) {
+			// Create a unique filename
+			NSString* nameWithoutExtension = [fileName stringByDeletingPathExtension];
+			NSString* extension = [fileName pathExtension];
+			int counter = 1;
+			do {
+				fileName = [NSString stringWithFormat:@"%@_%d.%@", nameWithoutExtension, counter, extension];
+				destinationPath = [aDocsDirectory stringByAppendingPathComponent:fileName];
+				counter++;
+			} while ([[NSFileManager defaultManager] fileExistsAtPath:destinationPath]);
+		}
+		
+		// Copy the file to Documents directory
+		BOOL success = [[NSFileManager defaultManager] copyItemAtURL:url toURL:[NSURL fileURLWithPath:destinationPath] error:&error];
+		
+		// Stop accessing security-scoped resource
+		[url stopAccessingSecurityScopedResource];
+		
+		if (success) {
+			NSLOG(@"%s Successfully copied disk image to: %@", __PRETTY_FUNCTION__, destinationPath);
+			
+			// Add to disk prefs
+			NSString* extension = [[destinationPath pathExtension] lowercaseString];
+			BOOL isCDROM = [extension isEqualToString:@"cdr"] || [extension isEqualToString:@"iso"];
+			PrefsAddString(isCDROM ? "cdrom" : "disk", [destinationPath UTF8String]);
+			
+			// Add to our disk array immediately
+			DiskTypeiOS *disk = [DiskTypeiOS new];
+			[disk setPath:destinationPath];
+			[disk setIsCDROM:isCDROM];
+			[disk setDisable:NO];
+			[self.diskArray addObject:disk];
+		} else {
+			NSLOG(@"%s Failed to copy disk image: %@", __PRETTY_FUNCTION__, error);
+			
+			// Show an alert to the user
+			UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"Import Failed" 
+																		   message:[NSString stringWithFormat:@"Failed to import %@: %@", fileName, error.localizedDescription]
+																	preferredStyle:UIAlertControllerStyleAlert];
+			[alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+			[self presentViewController:alert animated:YES completion:nil];
+		}
+	}
+	
+	// Save preferences to persist the changes
+	SavePrefs();
+	
+	// Just reload the table, don't reload disk data as we've already added them
+	[self.diskTable reloadData];
+}
+
+// This method is no longer used - external disk references don't work on iOS due to sandbox restrictions
+// Keeping for potential future use if iOS adds better file provider support
+/*
+- (void)_referenceDiskImages:(NSArray<NSURL*>*)urls
+{
+	// This approach doesn't work on iOS because security-scoped resource access
+	// is only valid within the app session and cannot persist across app launches
+	// or be used by the Unix-level file operations in the emulator
+}
+*/
+
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller
+{
+	NSLOG(@"%s Document picker was cancelled", __PRETTY_FUNCTION__);
+}
+
+- (void)viewWillDisappear:(BOOL)animated
+{
+	[super viewWillDisappear:animated];
+	
+	// Save any changes to preferences
+	[self _writePrefs];
+	SavePrefs();
+}
+
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator
 {
 	NSLOG (@"%s new size: %@", __PRETTY_FUNCTION__, NSStringFromCGSize(size));
@@ -420,6 +637,55 @@ const int kCDROMRefNum = -62;			// RefNum of driver
 	// Force a rebuild of the disk list.
 	[self _loadDiskData];
 	[self.diskTable performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
+}
+
+- (void)deleteDisk:(DiskTypeiOS*)disk
+{
+	NSString* diskName = [disk.path lastPathComponent];
+	NSString* message = [NSString stringWithFormat:@"Are you sure you want to delete '%@'? This action cannot be undone.", diskName];
+	
+	UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"Delete Disk" 
+																   message:message
+															preferredStyle:UIAlertControllerStyleAlert];
+	
+	[alert addAction:[UIAlertAction actionWithTitle:@"Cancel" 
+											  style:UIAlertActionStyleCancel 
+											handler:nil]];
+	
+	[alert addAction:[UIAlertAction actionWithTitle:@"Delete" 
+											  style:UIAlertActionStyleDestructive 
+											handler:^(UIAlertAction * _Nonnull action) {
+		[self _performDiskDeletion:disk];
+	}]];
+	
+	[self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)_performDiskDeletion:(DiskTypeiOS*)disk
+{
+	// Remove from array
+	[self.diskArray removeObject:disk];
+	
+	// Check if it's a file in Documents directory that should be deleted
+	NSString* docsDirectory = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+	if ([disk.path hasPrefix:docsDirectory]) {
+		// It's in our Documents directory, safe to delete the actual file
+		NSError* error = nil;
+		[[NSFileManager defaultManager] removeItemAtPath:disk.path error:&error];
+		if (error) {
+			NSLOG(@"%s Failed to delete file: %@", __PRETTY_FUNCTION__, error);
+		}
+	} else {
+		// External disk - this shouldn't happen anymore since we only copy files
+		NSLOG(@"%s Attempted to delete external disk at path: %@", __PRETTY_FUNCTION__, disk.path);
+	}
+	
+	// Update preferences and save
+	[self _writePrefs];
+	SavePrefs();
+	
+	// Reload table
+	[self.diskTable reloadData];
 }
 
 @end
