@@ -41,6 +41,10 @@
 #include <string.h>
 #include "sigsegv.h"
 
+#if TARGET_OS_IPHONE
+#import "config.h" 
+#endif
+
 #ifndef NO_STD_NAMESPACE
 using std::list;
 #endif
@@ -731,12 +735,30 @@ handleExceptions(void *priv)
 
 	msg = (mach_msg_header_t *)msgbuf;
 	reply = (mach_msg_header_t *)replybuf;
-
+	
+#if defined(DUMP_EXCEPTION_HEADERS)
+	static int sExceptionMessageCount = 0;
+#endif
 	for (;;) {
 		krc = mach_msg(msg, MACH_RCV_MSG, MSG_SIZE, MSG_SIZE,
 				_exceptionPort, 0, MACH_PORT_NULL);
 		MACH_CHECK_ERROR(mach_msg, krc);
+		
+#if defined(DUMP_EXCEPTION_HEADERS)
+		sExceptionMessageCount++;
+		printf ("%s macemu exception message count: %d\n", __PRETTY_FUNCTION__, sExceptionMessageCount);
 
+		printf ("    msgh_bits: 0x%X\n", msg->msgh_bits);
+		printf ("    msgh_size: %d\n", msg->msgh_size);
+		printf ("    msgh_remote_port: 0x%X\n", msg->msgh_remote_port);
+		printf ("    msgh_local_port: 0x%X\n", msg->msgh_local_port);
+		printf ("    msgh_voucher_port: 0x%X\n", msg->msgh_voucher_port);
+		printf ("    msgh_id: 0x%X\n", msg->msgh_id);
+		
+		for (int anOffset = sizeof(mach_msg_header_t); anOffset < msg->msgh_size; anOffset += 4) {
+			printf ("    0x%X\n", *(int*)(((uint8_t*)msg) + anOffset));
+		}
+#endif
 		if (!mach_exc_server(msg, reply)) {
 			fprintf(stderr, "exc_server hated the message\n");
 			exit(1);
@@ -2639,6 +2661,16 @@ static void mach_set_thread_state(sigsegv_info_t *SIP)
 }
 #endif
 
+#if TARGET_OS_IPHONE
+
+#ifdef NATMEM_OFFSET
+const uint64_t VMBaseDiff = NATMEM_OFFSET;
+#else
+const uint64_t VMBaseDiff = 0;
+#endif
+
+#endif
+
 // Return the address of the invalid memory reference
 sigsegv_address_t sigsegv_get_fault_address(sigsegv_info_t *SIP)
 {
@@ -2660,6 +2692,9 @@ sigsegv_address_t sigsegv_get_fault_address(sigsegv_info_t *SIP)
 			if (use_fast_path < 0)
 				use_fast_path = addr == SIP->addr;
 		}
+#if TARGET_OS_IPHONE
+		addr = VMBaseDiff + addr;
+#endif
 		SIP->addr = addr;
 	}
 #endif
@@ -2697,7 +2732,14 @@ EXTERN uint32_t RAMBase, ROMBase, ROMEnd;
 template<typename T> T safeLoad(uint32_t a) {
 	if (a < 0x3000) return *(T *)&gZeroPage[a];
 	else if ((a & ~0x1fff) == 0x68ffe000 || (a & ~0x1fff) == 0x5fffe000) return *(T *)&gKernelData[a & 0x1fff];
-	else if (a >= RAMBase && a < ROMEnd) return *(T *)(uint64_t)a;
+	else if (a >= RAMBase && a < ROMEnd) {
+#if TARGET_OS_IPHONE
+		return *(T *)(VMBaseDiff + a);
+#else
+		return *(T *)(uint64_t)a;
+#endif
+	}
+
 	return 0;
 }
 template<typename T> void safeStore(uint32_t a, T d) {

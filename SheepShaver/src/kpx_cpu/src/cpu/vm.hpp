@@ -208,11 +208,9 @@ const uintptr VMBaseDiff = NATMEM_OFFSET;
 static inline uint8 * vm_do_get_real_address(vm_addr_t addr)
 {
 	uintptr a = vm_wrap_address(addr);
-#if defined(__APPLE__) && defined(__x86_64__) || defined(MEM_BULK)
+#if defined(__APPLE__) && (defined(__x86_64__) || defined(__aarch64__))
 	extern uint8 gZeroPage[0x3000], gKernelData[0x2000];
-#ifndef MEM_BULK
 	if (a < 0x3000) return &gZeroPage[a];
-#endif
 	if ((a & ~0x1fff) == 0x68ffe000 || (a & ~0x1fff) == 0x5fffe000) return &gKernelData[a & 0x1fff];
 #endif
 	return (uint8 *)(VMBaseDiff + a);

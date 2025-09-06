@@ -23,6 +23,9 @@
 #include "sys.h"
 #include "prefs.h"
 
+#ifdef __APPLE__
+#include "TargetConditionals.h"
+#endif
 
 // Common preferences items (those which exist on all platforms)
 prefs_desc common_prefs_items[] = {
@@ -88,8 +91,13 @@ void AddPrefsDefaults(void)
 #endif
 	PrefsAddInt32("bootdriver", 0);
 	PrefsAddInt32("bootdrive", 0);
+#if TARGET_OS_IPHONE
+	PrefsReplaceInt32("ramsize", 64);
+	PrefsReplaceInt32("frameskip", 1);
+#else
 	PrefsAddInt32("ramsize", 16 * 1024 * 1024);
 	PrefsAddInt32("frameskip", 8);
+#endif
 	PrefsAddBool("gfxaccel", true);
 	PrefsAddBool("nocdrom", false);
 	PrefsAddBool("nonet", false);
@@ -97,7 +105,7 @@ void AddPrefsDefaults(void)
 	PrefsAddBool("nogui", false);
 	PrefsAddBool("noclipconversion", false);
 	PrefsAddBool("ignoresegv", true);
-	PrefsAddBool("ignoreillegal", true);
+	PrefsAddBool("ignoreillegal", false);
 
 #if USE_JIT
 	// JIT compiler specific options

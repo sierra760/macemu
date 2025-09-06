@@ -124,7 +124,9 @@
 #endif
 
 #ifdef USE_SDL
-#include "my_sdl.h"
+#include <SDL.h>
+#include <string>
+#include <SDL_main.h>
 #if !SDL_VERSION_ATLEAST(3, 0, 0)
 #define SDL_PLATFORM_MACOS      __MACOSX__
 #endif
@@ -160,6 +162,14 @@
 #include "mon.h"
 #endif
 
+#if TARGET_OS_IPHONE
+extern "C" {
+bool SS_ShowiOSPreferences(void);
+int SS_ChooseiOSBootRom(const char* inFileName);	// returns file descriptor or error
+}
+#endif
+
+#define SHOW_IOS_PREFS_ON_LAUNCH 1
 
 // Enable emulation of unaligned lmw/stmw?
 #define EMULATE_UNALIGNED_LOADSTORE_MULTIPLE 1
@@ -173,6 +183,8 @@
 // Interrupts in native mode?
 #define INTERRUPTS_IN_NATIVE_MODE 1
 
+// Debugging:
+#define SHOW_WARNING_BEFORE_LOADING_ROM (TARGET_OS_IPHONE && 0)
 
 // Constants
 const char ROM_FILE_NAME[] = "ROM";
@@ -208,7 +220,7 @@ uint8 *RAMBaseHost;		// Base address of Mac RAM (host address space)
 uint8 *ROMBaseHost;		// Base address of Mac ROM (host address space)
 uint32 ROMEnd;
 
-#if defined(__APPLE__) && defined(__x86_64__) || defined(MEM_BULK)
+#if defined(__APPLE__)
 uint8 gZeroPage[0x3000], gKernelData[0x2000];
 #endif
 
@@ -267,7 +279,7 @@ uintptr SheepMem::data;						// Top of SheepShaver data (stack like storage)
 
 
 // Prototypes
-#if !defined(__APPLE__) || !defined(__x86_64__)
+#if (!defined(__APPLE__) || !defined(__x86_64__)) && !defined(TARGET_OS_IPHONE)
 static bool kernel_data_init(void);
 static bool shm_map_address(int kernel_area, uint32 addr);
 #endif
@@ -609,7 +621,18 @@ static bool load_mac_rom(void)
 	uint32 rom_size, actual;
 	uint8 *rom_tmp;
 	const char *rom_path = PrefsFindString("rom");
+	
+	if (rom_path) {
+		printf ("%s rom_path: %s\n", __PRETTY_FUNCTION__, rom_path);
+	}
+	printf ("%s ROM_FILE_NAME: %s\n", __PRETTY_FUNCTION__, ROM_FILE_NAME);
+	printf ("%s ROM_FILE_NAME2: %s\n", __PRETTY_FUNCTION__, ROM_FILE_NAME2);
+	
+#if TARGET_OS_IPHONE
+	int rom_fd = SS_ChooseiOSBootRom(rom_path);
+#else
 	int rom_fd = open(rom_path && *rom_path ? rom_path : ROM_FILE_NAME, O_RDONLY);
+#endif
 	if (rom_fd < 0) {
 		rom_fd = open(ROM_FILE_NAME2, O_RDONLY);
 		if (rom_fd < 0) {
@@ -617,6 +640,28 @@ static bool load_mac_rom(void)
 			return false;
 		}
 	}
+	
+#if SHOW_WARNING_BEFORE_LOADING_ROM
+	// This works.
+	SDL_MessageBoxButtonData aButtonData;
+	aButtonData.buttonid = 0;
+	aButtonData.text = "OK";
+	aButtonData.flags = SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT;
+
+	SDL_MessageBoxData aMessageBoxData;
+	aMessageBoxData.message = "About to load Mac ROM...";
+	aMessageBoxData.title = "Loading ROM";
+	aMessageBoxData.numbuttons = 1;
+	aMessageBoxData.flags = SDL_MESSAGEBOX_INFORMATION;
+	aMessageBoxData.window = NULL;
+	aMessageBoxData.colorScheme = NULL;
+	aMessageBoxData.buttons = &aButtonData;
+		
+	int aButtonID = -1;
+//	UIKit_ShowMessageBox(&aMessageBoxData, &aButtonID);
+	SDL_ShowMessageBox(&aMessageBoxData, &aButtonID);
+#endif
+	
 	printf("%s", GetString(STR_READING_ROM_FILE));
 	rom_size = lseek(rom_fd, 0, SEEK_END);
 	lseek(rom_fd, 0, SEEK_SET);
@@ -637,6 +682,16 @@ static bool load_mac_rom(void)
 	delete[] rom_tmp;
 	return true;
 }
+
+#if TARGET_OS_IPHONE
+static bool check_prefs(void)
+{
+#if SHOW_IOS_PREFS_ON_LAUNCH
+	SS_ShowiOSPreferences();		// This works.
+#endif
+	return true;
+}
+#endif
 
 static bool install_signal_handlers(void)
 {
@@ -786,7 +841,12 @@ static void gui_activate (GtkApplication *app)
 #endif
 #endif
 
-int main(int argc, char **argv)
+extern "C" {
+#if TARGET_OS_IPHONE
+int main_ios(int argc, char* argv[])
+#else
+int main(int argc, char *argv[])
+#endif
 {
 #ifdef ENABLE_GTK3
 	GtkApplication *app = NULL;
@@ -1004,7 +1064,7 @@ int main(int argc, char **argv)
 		goto quit;
 	}
 
-#if !(defined(__APPLE__) && defined(__x86_64__) || defined(MEM_BULK))
+#if (!defined(__APPLE__) || !defined(__x86_64__)) && !defined(TARGET_OS_IPHONE)
 	// Create areas for Kernel Data
 	if (!kernel_data_init())
 		goto quit;
@@ -1145,6 +1205,11 @@ int main(int argc, char **argv)
 	if (!load_mac_rom())
 		goto quit;
 
+#if TARGET_OS_IPHONE
+	if (!check_prefs())
+		goto quit;
+#endif
+	
 	// Initialize everything
 	if (!InitAll(vmdir))
 		goto quit;
@@ -1208,7 +1273,7 @@ quit:
 	return 0;
 }
 
-
+}	// extern "C"
 /*
  *  Cleanup and quit
  */
@@ -1309,7 +1374,7 @@ static void Quit(void)
 	exit(0);
 }
 
-#if !defined(__APPLE__) || !defined(__x86_64__)
+#if (!defined(__APPLE__) || !defined(__x86_64__)) && !defined(TARGET_OS_IPHONE)
 /*
  *  Initialize Kernel Data segments
  */
@@ -1582,8 +1647,10 @@ static void *tick_func(void *arg)
 		}
 	}
 
-	D(uint64 end = GetTicks_usec());
+#if DEBUG
+	uint64 end = GetTicks_usec();
 	D(bug("%lld ticks in %lld usec = %f ticks/sec\n", ticks, end - start, ticks * 1000000.0 / (end - start)));
+#endif
 	return NULL;
 }
 
@@ -2444,3 +2511,4 @@ bool ChoiceAlert(const char *text, const char *pos, const char *neg)
 	printf(GetString(STR_SHELL_WARNING_PREFIX), text);
 	return false;	//!!
 }
+ // extern "C"

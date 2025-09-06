@@ -1,3 +1,16 @@
+#if defined(__APPLE__)
+#include "TargetConditionals.h"
+#endif
+
+#if TARGET_OS_IPHONE
+	#if defined(__x86_64__)
+		#include "config-ios-x86_64.h"
+	#elif defined(__aarch64__)
+		#include "config-ios-aarch64.h"
+	#else
+		#error Unknown iOS platform
+	#endif
+#else
 #if defined(__x86_64__)
 	#include "config-macosx-x86_64.h"
 #elif defined(__i386__)
@@ -6,6 +19,7 @@
 	#include "config-macosx-ppc_32.h"
 #elif defined(__aarch64__)
 	#include "config-macosx-aarch64.h"
-#else
-	#error Unknown platform
+	#elif
+		#error Unknown Mac platform
+	#endif
 #endif
