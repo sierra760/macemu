@@ -8,10 +8,56 @@
 #import "SSGestureRecognizerManager.h"
 
 #import "SSPreferencesViewController.h"
+#import <objc/runtime.h>
 
 SSGestureRecognizerManager* gGestureRecognizer;
 UIWindow* gInitialPrefsWindow;
 UIWindow* gSDLWindow;
+
+// Category for SDL view controller to add canPerformAction method
+@interface UIViewController (CommandWBlocking)
+@end
+
+@implementation UIViewController (CommandWBlocking)
+
++ (void)load {
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
+		Class class = [self class];
+		
+		SEL originalSelector = @selector(canPerformAction:withSender:);
+		SEL swizzledSelector = @selector(ss_canPerformAction:withSender:);
+		
+		Method originalMethod = class_getInstanceMethod(class, originalSelector);
+		Method swizzledMethod = class_getInstanceMethod(class, swizzledSelector);
+		
+		BOOL didAddMethod = class_addMethod(class,
+											originalSelector,
+											method_getImplementation(swizzledMethod),
+											method_getTypeEncoding(swizzledMethod));
+		
+		if (didAddMethod) {
+			class_replaceMethod(class,
+								swizzledSelector,
+								method_getImplementation(originalMethod),
+								method_getTypeEncoding(originalMethod));
+		} else {
+			method_exchangeImplementations(originalMethod, swizzledMethod);
+		}
+	});
+}
+
+- (BOOL)ss_canPerformAction:(SEL)action withSender:(id)sender {
+	if (action == NSSelectorFromString(@"_performClose:")) {
+		// Blocks Command-W from closing SheepShaver
+		// Return YES to indicate we CAN perform the action (but we won't actually do it)
+		return YES;
+	}
+	// Call original implementation
+	return [self ss_canPerformAction:action withSender:sender];
+}
+
+@end
 
 @interface SSGestureRecognizerManager()
 
